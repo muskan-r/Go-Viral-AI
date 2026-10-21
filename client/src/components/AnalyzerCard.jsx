@@ -19,7 +19,9 @@ export default function AnalyzerCard() {
     try {
       setLoading(true);
 
-      const res = await axios.post("http://localhost:5000/api/v1/analyze", {
+      const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+
+      const res = await axios.post(`${API_URL}/v1/analyze`, {
         caption,
         hook,
       });
