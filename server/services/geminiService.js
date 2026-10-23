@@ -1,45 +1,49 @@
+
 import dotenv from "dotenv";
 dotenv.config();
+
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const apiKey = process.env.GEMINI_API_KEY;
+
+if (!apiKey) {
+  throw new Error("GEMINI_API_KEY is missing from environment variables.");
+}
+
+const genAI = new GoogleGenerativeAI(apiKey);
 
 const PRIMARY_MODEL = process.env.GEMINI_MODEL || "gemini-3.8-flash";
-const FALLBACK_MODEL = process.env.GEMINI_FALLBACK_MODEL || ""; // optional
+const FALLBACK_MODEL = process.env.GEMINI_FALLBACK_MODEL || "";
 
-const MAX_RETRIES = 3;
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const isTemporary = (err) => [429, 500, 503].includes(err?.status);
+const isTemporary = (error) =>
+  [429, 500, 503].includes(error?.status);
 
-const callModel = async (modelName, prompt) => {
+async function callModel(modelName, prompt) {
   const model = genAI.getGenerativeModel({ model: modelName });
 
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      const result = await model.generateContent(prompt);
-      return result.response.text();
-    } catch (err) {
-      if (!isTemporary(err) || attempt === MAX_RETRIES) throw err;
-
-      const delay = 1500 * 2 ** (attempt - 1); // 1.5s, 3s, 6s
-      console.warn(
-        `[${modelName}] ${err.status} on attempt ${attempt}, retrying in ${delay}ms`
-      );
-      await sleep(delay);
-    }
+  try {
+    const result = await model.generateContent(prompt);
+    return result.response.text();
+  } catch (error) {
+    console.error(
+      `Gemini model ${modelName} failed with status ${error?.status ?? "unknown"}`
+    );
+    throw error;
   }
-};
+}
 
-export const analyzeContent = async (caption, hook) => {
+export async function analyzeContent(caption, hook) {
   const prompt = `
-You are an elite viral content strategist.
+You are a professional social media content strategist.
 
-Analyze this social media content professionally.
+Analyze the hook and caption below. Be specific, useful, and concise.
+Do not claim that virality can be guaranteed.
 
-Return response in this format:
+Return the report using this exact structure:
 
-🔥 VIRALITY SCORE: (number out of 100, like 78/100)
+🔥 VIRALITY SCORE: (number out of 100)
 🔥 HOOK STRENGTH: (number out of 100)
 🔥 ENGAGEMENT POTENTIAL: (number out of 100)
 🔥 TREND RELEVANCE: (number out of 100)
@@ -65,12 +69,31 @@ ${hook}
 
   try {
     return await callModel(PRIMARY_MODEL, prompt);
-  } catch (err) {
-    if (isTemporary(err) && FALLBACK_MODEL && FALLBACK_MODEL !== PRIMARY_MODEL) {
-      console.warn(`Switching to fallback model: ${FALLBACK_MODEL}`);
-      return await callModel(FALLBACK_MODEL, prompt);
+  } catch (error) {
+    if (!isTemporary(error)) {
+      throw error;
     }
-    console.error("Gemini error:", err.message);
-    throw err;
+
+    if (
+      FALLBACK_MODEL &&
+      FALLBACK_MODEL !== PRIMARY_MODEL
+    ) {
+      console.warn(`Trying fallback model: ${FALLBACK_MODEL}`);
+
+      try {
+        return await callModel(FALLBACK_MODEL, prompt);
+      } catch (fallbackError) {
+        console.error(
+          "Fallback model also failed:",
+          fallbackError?.status ?? "unknown"
+        );
+        throw fallbackError;
+      }
+    }
+
+    // One short retry if no fallback model is configured.
+    await sleep(1000);
+
+    return await callModel(PRIMARY_MODEL, prompt);
   }
-};
+}

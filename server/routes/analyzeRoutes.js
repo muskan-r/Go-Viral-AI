@@ -1,3 +1,4 @@
+
 import express from "express";
 import { analyzeContent } from "../services/geminiService.js";
 
@@ -5,28 +6,48 @@ const router = express.Router();
 
 router.post("/", async (req, res) => {
   try {
-    const { caption, hook } = req.body;
+    const { caption, hook } = req.body ?? {};
 
-    if (!caption || !hook) {
+    if (
+      typeof caption !== "string" ||
+      !caption.trim() ||
+      typeof hook !== "string" ||
+      !hook.trim()
+    ) {
       return res.status(400).json({
         success: false,
-        message: "Caption and hook required",
+        message: "Please enter both a hook and a caption.",
       });
     }
 
-    const result = await analyzeContent(caption, hook);
+    const result = await analyzeContent(
+      caption.trim(),
+      hook.trim()
+    );
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       result,
     });
-
   } catch (error) {
-    console.log("🔥 ROUTE ERROR:", error);
+    console.error(
+      "Analysis route failed:",
+      error?.status ?? "unknown",
+      error?.message ?? "Unknown error"
+    );
 
-    res.status(500).json({
+    if ([429, 500, 503].includes(error?.status)) {
+      return res.status(503).json({
+        success: false,
+        message:
+          "AI analysis is temporarily busy. Please try again shortly.",
+      });
+    }
+
+    return res.status(500).json({
       success: false,
-      message: "Analysis failed",
+      message:
+        "We couldn't generate your report. Please try again.",
     });
   }
 });
